@@ -31,7 +31,7 @@ const SKINS = [
   { head: ["#ffffff", "#ffd700", "#b8860b"], body: ["#fff0a5", "#daa520", "#2c1d00"] }
 ];
 
-// ════════════ БАЗА НИВ ДЛЯ БОТОВ (ИЗ DEVOURX) ════════════
+// ════════════ БАЗА НИКОВ ДЛЯ БОТОВ ════════════
 const BOT_NICKNAMES = [
   'KILLER', 'VIPER', 'COBRA', 'SHADOW', 'GHOST', 'DEMON', 'RAZOR', 'VENOM',
   'NOOB', 'SLIMY', 'WIGGLE', 'NOODLE', 'ZIGZAG', 'SQUISHY', 'WOBBLY',
@@ -57,7 +57,6 @@ for (let i = 0; i < MAX_FOOD; i++) {
 
 // ════════════ ФУНКЦИЯ ДИНАМИЧЕСКОГО СПАВНА БОТА ════════════
 function spawnBot(botId) {
-  // Выбираем случайное имя из списка и случайный скин
   const randomNick = BOT_NICKNAMES[Math.floor(Math.random() * BOT_NICKNAMES.length)];
   const randomSkin = SKINS[Math.floor(Math.random() * SKINS.length)];
   
@@ -81,7 +80,7 @@ function spawnBot(botId) {
     players[botId].snake.push({ x: startX, y: startY });
   }
 
-  // Оповещаем всех игроков на фронтенде, что появился новый противник
+  // Оповещаем всех игроков
   io.emit('new_player', players[botId]);
   console.log(`[BOT] Возродился: ${players[botId].name} (${botId})`);
 }
@@ -91,10 +90,49 @@ for (let i = 0; i < 4; i++) {
   spawnBot(`bot_${i}`);
 }
 
+// Функция обработки смерти игрока или бота
+function handleDeath(deadId, deadSnake, skin) {
+  if (players[deadId]) {
+    let spawnedFoods = [];
+    if (deadSnake && deadSnake.length > 0) {
+      for (let i = 0; i < deadSnake.length; i += 2) {
+        let seg = deadSnake[i];
+        let scatterAngle = Math.random() * Math.PI * 2;
+        let scatterDist = Math.random() * 35;
+        
+        let f = {
+          id: Math.random().toString(36).substring(2, 9),
+          x: Math.max(20, Math.min(WORLD_SIZE - 20, seg.x + Math.cos(scatterAngle) * scatterDist)),
+          y: Math.max(20, Math.min(WORLD_SIZE - 20, seg.y + Math.sin(scatterAngle) * scatterDist)),
+          radius: Math.random() * 3 + 5,
+          color: skin ? skin.body[1] : '#66fcf1'
+        };
+        foods.push(f);
+        spawnedFoods.push(f);
+      }
+      io.emit('foods_spawned', spawnedFoods);
+    }
+
+    io.emit('player_exploded', { x: players[deadId].x, y: players[deadId].y, color: skin ? skin.head[1] : '#66fcf1' });
+
+    if (players[deadId].isBot) {
+      console.log(`[BOT] ${players[deadId].name} погиб. Перерождение через 4 сек...`);
+      delete players[deadId];
+      io.emit('player_disconnected', deadId); 
+      
+      setTimeout(() => {
+        spawnBot(deadId);
+      }, BOT_RESPAWN_DELAY);
+    } else {
+      delete players[deadId];
+      io.emit('player_disconnected', deadId);
+    }
+  }
+}
+
 io.on('connection', (socket) => {
   console.log('Игрок подключился:', socket.id);
 
-  // Отправляем игроку текущую карту
   socket.emit('init_data', { players, foods });
 
   socket.on('init_player', (data) => {
@@ -150,51 +188,6 @@ io.on('connection', (socket) => {
       io.emit('food_update', { eatenId: data.id, newFood: newFood });
     }
   });
-
-  function handleDeath(deadId, deadSnake, skin) {
-    if (players[deadId]) {
-      let spawnedFoods = [];
-      if (deadSnake && deadSnake.length > 0) {
-        for (let i = 0; i < deadSnake.length; i += 2) {
-          let seg = deadSnake[i];
-          let scatterAngle = Math.random() * Math.PI * 2;
-          let scatterDist = Math.random() * 35;
-          
-          let f = {
-            id: Math.random().toString(36).substring(2, 9),
-            x: Math.max(20, Math.min(WORLD_SIZE - 20, seg.x + Math.cos(scatterAngle) * scatterDist)),
-            y: Math.max(20, Math.min(WORLD_SIZE - 20, seg.y + Math.sin(scatterAngle) * scatterDist)),
-            radius: Math.random() * 3 + 5,
-            color: skin ? skin.body[1] : '#66fcf1'
-          };
-          foods.push(f);
-          spawnedFoods.push(f);
-        }
-        io.emit('foods_spawned', spawnedFoods);
-      }
-
-      io.emit('player_exploded', { x: players[deadId].x, y: players[deadId].y, color: skin ? skin.head[1] : '#66fcf1' });
-
-      // ════════════ КРАСИВАЯ СМЕРТЬ И ПЕРЕРОЖДЕНИЕ БОТА ════════════
-      if (players[deadId].isBot) {
-        console.log(`[BOT] ${players[deadId].name} погиб. Перерождение через 4 сек...`);
-        
-        // Удаляем бота из списка активных игроков и убираем с экранов клиентов
-        delete players[deadId];
-        io.emit('player_disconnected', deadId); 
-        
-        // Запускаем таймер, по истечении которого создаем НОВОГО бота с этим же ID
-        setTimeout(() => {
-          spawnBot(deadId);
-        }, BOT_RESPAWN_DELAY);
-
-      } else {
-        // Если погиб реальный игрок
-        delete players[deadId];
-        socket.broadcast.emit('player_disconnected', deadId);
-      }
-    }
-  }
 
   socket.on('player_died', (data) => {
     handleDeath(socket.id, data.snake, data.skin);
@@ -280,16 +273,21 @@ setInterval(() => {
     bot.x += Math.cos(bot.angle) * speed;
     bot.y += Math.sin(bot.angle) * speed;
 
-    bot.snake[0] = { x: bot.x, y: bot.y };
-    for (let i = bot.snake.length - 1; i > 0; i--) {
-      let current = bot.snake[i];
-      let prev = bot.snake[i - 1];
-      let dx = prev.x - current.x;
-      let dy = prev.y - current.y;
-      let dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist > 0) {
-        current.x = prev.x - (dx / dist) * 9;
-        current.y = prev.y - (dy / dist) * 9;
+    if (!bot.snake) bot.snake = [];
+    if (bot.snake.length > 0) {
+      bot.snake[0] = { x: bot.x, y: bot.y };
+      for (let i = bot.snake.length - 1; i > 0; i--) {
+        let current = bot.snake[i];
+        let prev = bot.snake[i - 1];
+        if (current && prev) {
+          let dx = prev.x - current.x;
+          let dy = prev.y - current.y;
+          let dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 0) {
+            current.x = prev.x - (dx / dist) * 9;
+            current.y = prev.y - (dy / dist) * 9;
+          }
+        }
       }
     }
 
@@ -300,7 +298,9 @@ setInterval(() => {
       if (Math.sqrt(dx * dx + dy * dy) < 14 + f.radius) {
         foods.splice(i, 1);
         bot.score++;
-        bot.snake.push({ x: bot.snake[bot.snake.length - 1].x, y: bot.snake[bot.snake.length - 1].y });
+        if (bot.snake && bot.snake.length > 0) {
+          bot.snake.push({ x: bot.snake[bot.snake.length - 1].x, y: bot.snake[bot.snake.length - 1].y });
+        }
         
         let newFood = createFoodItem();
         foods.push(newFood);
@@ -345,3 +345,4 @@ setInterval(() => {
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
   console.log(`Сервер Revert.io запущен на порту ${PORT}`);
+});
