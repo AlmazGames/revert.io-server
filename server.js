@@ -12,7 +12,7 @@ const io = require('socket.io')(http, {
 });
 
 app.get('/', (req, res) => {
-  res.send('Сервер Revert.io: Только реальные игроки.');
+  res.send('Сервер Revert.io активен: Чистый мультиплеер.');
 });
 
 const WORLD_SIZE = 4000;
@@ -31,20 +31,41 @@ function createFoodItem() {
   };
 }
 
-// Заполняем мир едой
 for (let i = 0; i < MAX_FOOD; i++) {
   foods.push(createFoodItem());
 }
 
+// ФУНКЦИЯ ВЫПАДЕНИЯ ЕДЫ (ВОЗВРАЩЕНА!)
+function dropFoodOnDeath(snake, skin) {
+  let spawnedFoods = [];
+  if (snake && snake.length > 0) {
+    for (let i = 0; i < snake.length; i += 2) {
+      let seg = snake[i];
+      let scatterAngle = Math.random() * Math.PI * 2;
+      let scatterDist = Math.random() * 35;
+      
+      let f = {
+        id: Math.random().toString(36).substring(2, 9),
+        x: Math.max(20, Math.min(WORLD_SIZE - 20, seg.x + Math.cos(scatterAngle) * scatterDist)),
+        y: Math.max(20, Math.min(WORLD_SIZE - 20, seg.y + Math.sin(scatterAngle) * scatterDist)),
+        radius: Math.random() * 3 + 5,
+        color: skin ? skin.body[1] : '#66fcf1'
+      };
+      foods.push(f);
+      spawnedFoods.push(f);
+    }
+  }
+  return spawnedFoods;
+}
+
 io.on('connection', (socket) => {
   console.log('Игрок подключился:', socket.id);
-
   socket.emit('init_data', { players, foods });
 
   socket.on('init_player', (data) => {
     players[socket.id] = {
       id: socket.id,
-      isBot: false, // Теперь тут точно нет ботов
+      isBot: false,
       name: data.name,
       x: data.x,
       y: data.y,
@@ -63,8 +84,7 @@ io.on('connection', (socket) => {
       p.y = data.y;
       p.angle = data.angle;
       p.score = data.score;
-      p.snake = data.snake; // Сервер просто транслирует движения
-      
+      p.snake = data.snake;
       socket.broadcast.emit('player_moved', players[socket.id]);
     }
   });
@@ -81,10 +101,14 @@ io.on('connection', (socket) => {
 
   socket.on('player_died', (data) => {
     if (players[socket.id]) {
-      // Транслируем взрыв всем остальным
+      // 1. Высыпаем еду из погибшего игрока
+      const droppedFoods = dropFoodOnDeath(data.snake, data.skin);
+      io.emit('foods_spawned', droppedFoods); // Отправляем еду всем
+      
+      // 2. Отправляем эффект взрыва
       io.emit('player_exploded', { x: players[socket.id].x, y: players[socket.id].y, color: data.skin ? data.skin.head[1] : '#66fcf1' });
       
-      // Просто удаляем игрока
+      // 3. Удаляем игрока
       delete players[socket.id];
       socket.broadcast.emit('player_disconnected', socket.id);
     }
@@ -100,5 +124,5 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
-  console.log(`Сервер Revert.io запущен. Боты удалены.`);
+  console.log(`Сервер запущен. Еда при смерти работает!`);
 });
