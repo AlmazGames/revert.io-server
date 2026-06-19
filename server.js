@@ -1,16 +1,20 @@
 const express = require('express');
 const app = express();
 const http = require('http').createServer(app);
+
+// Настраиваем Socket.io с жестким разрешением для твоего GitHub Pages
 const io = require('socket.io')(http, {
   cors: {
-    origin: "*", // Разрешаем подключение с твоего Vercel сайта
-    methods: ["GET", "POST"]
-  }
+    origin: "https://almazgames.github.io", // Твой фронтенд
+    methods: ["GET", "POST"],
+    credentials: true
+  },
+  allowEIO3: true // Для совместимости версий
 });
 
-// Базовый роут, просто проверить что сервер жив
+// Базовый роут, чтобы проверить в браузере
 app.get('/', (req, res) => {
-  res.send('Сервер revert.io работает!');
+  res.send('Сервер revert.io работает и ждет игроков с GitHub Pages!');
 });
 
 io.on('connection', (socket) => {
@@ -27,7 +31,8 @@ io.on('connection', (socket) => {
   });
 });
 
+// Автоматический порт от Render или 3000 локально
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
-  console.log(`Сервер запущен на порту ${PORT}`);
+  console.log(`Сервер успешно запущен на порту ${PORT}`);
 });
