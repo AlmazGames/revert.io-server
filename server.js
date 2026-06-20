@@ -5,14 +5,14 @@ const http = require('http').createServer(app);
 const io = require('socket.io')(http, {
   cors: {
     origin: "https://almazgames.github.io",
-    methods: ["GET", ["POST"]],
+    methods: ["GET", "POST"],
     credentials: true
   },
   allowEIO3: true
 });
 
 app.get('/', (req, res) => {
-  res.send('Сервер Revert.io: Логика полностью на сервере.');
+  res.send('Сервер Revert.io: Логика полностью на сервере. Смерть об себя отключена!');
 });
 
 const WORLD_SIZE = 4000;
@@ -114,7 +114,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// СЕРВЕРНЫЙ ИГРОВОЙ ЦИКЛ (60 FPS)
 const dt = 1000 / 60;
 setInterval(() => {
   let deadPlayers = [];
@@ -124,7 +123,6 @@ setInterval(() => {
     
     if (p.spawnProtection > 0) p.spawnProtection -= dt;
 
-    // Плавный поворот головы к целевому углу
     let angleDiff = p.targetAngle - p.angle;
     while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
     while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
@@ -134,7 +132,6 @@ setInterval(() => {
     if (angleDiff < -maxTurnSpeed) angleDiff = -maxTurnSpeed;
     p.angle += angleDiff;
 
-    // Расчет скорости
     let canBoost = p.isBoosting && p.score > 10;
     let currentSpeed = canBoost ? 4 * 1.4 : 4;
 
@@ -149,24 +146,20 @@ setInterval(() => {
       p.boostTimer = 0;
     }
 
-    // Движение головы змейки
     p.x += Math.cos(p.angle) * currentSpeed;
     p.y += Math.sin(p.angle) * currentSpeed;
 
-    // Обновление головы в массиве тела
     if (p.snake.length > 0) {
       p.snake[0].x = p.x;
       p.snake[0].y = p.y;
       p.snake[0].angle = p.angle;
     }
 
-    // Проверка выхода за границы карты
     if (p.x < 0 || p.x > WORLD_SIZE || p.y < 0 || p.y > WORLD_SIZE) {
       deadPlayers.push({ id: id, x: p.x, y: p.y, skin: p.skin, snake: p.snake });
       continue;
     }
 
-    // Движение хвоста за головой
     for (let i = 1; i < p.snake.length; i++) {
       let current = p.snake[i];
       let prev = p.snake[i - 1];
@@ -180,17 +173,14 @@ setInterval(() => {
       current.angle = Math.atan2(dy, dx);
     }
 
-    // Доращивание хвоста, если score вырос
     while (p.snake.length < p.score) {
       let last = p.snake[p.snake.length - 1] || { x: p.x, y: p.y, angle: p.angle };
       p.snake.push({ x: last.x, y: last.y, angle: last.angle });
     }
-    // Обрезка, если уменьшился
     while (p.snake.length > p.score) {
       p.snake.pop();
     }
 
-    // Поедание еды (с увеличенным на 20px радиусом засасывания)
     for (let i = foods.length - 1; i >= 0; i--) {
       let f = foods[i];
       let fDx = p.x - f.x;
@@ -208,18 +198,16 @@ setInterval(() => {
     }
   }
 
-  // БИТВА: Проверка столкновений между змейками на сервере
+  // БИТВА: ИСПРАВЛЕННЫЙ И ИСКЛЮЧАЮЩИЙ СЕБЯ КЛАСС КОЛЛИЗИЙ
   for (let id in players) {
     let p = players[id];
     if (p.spawnProtection > 0) continue;
 
     for (let otherId in players) {
-      let other = players[otherId];
-      // Проверяем столкновение головы p с телом other
-      // Если врезался в себя, проверяем только сегменты начиная с 4-го
-      let startIdx = (id === otherId) ? 4 : 0;
+      if (id === otherId) continue; // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Об свой хвост умереть больше нельзя!
 
-      for (let i = startIdx; i < other.snake.length; i++) {
+      let other = players[otherId];
+      for (let i = 0; i < other.snake.length; i++) {
         let seg = other.snake[i];
         let hitDx = p.x - seg.x;
         let hitDy = p.y - seg.y;
@@ -235,7 +223,6 @@ setInterval(() => {
     }
   }
 
-  // Обработка смертей
   deadPlayers.forEach(d => {
     if (players[d.id]) {
       const droppedFoods = dropFoodOnDeath(d.snake, d.skin);
@@ -247,7 +234,6 @@ setInterval(() => {
     }
   });
 
-  // Отправляем всем игрокам глобальное состояние мира
   io.emit('heartbeat', players);
 }, dt);
 
