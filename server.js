@@ -12,7 +12,7 @@ const io = require('socket.io')(http, {
 });
 
 app.get('/', (req, res) => {
-  res.send('Сервер Revert.io активен: Логика на сервере. Смерть об себя исправлена, ИИ бота оптимизирован (10 FPS)!');
+  res.send('Сервер Revert.io активен: Хвост ограничен до 200 сегментов, ИИ бота оптимизирован (10 FPS)!');
 });
 
 const WORLD_SIZE = 4000;
@@ -211,6 +211,7 @@ setInterval(() => {
       p.boostTimer += dt;
       if (p.boostTimer >= 1000) {
         p.score--;
+        // Уменьшаем хвост при ускорении только если он реально есть в массиве
         if (p.snake.length > 0) p.snake.pop();
         p.boostTimer %= 1000;
       }
@@ -245,11 +246,14 @@ setInterval(() => {
       current.angle = Math.atan2(dy, dx);
     }
 
-    while (p.snake.length < p.score) {
+    // [ИЗМЕНЕНО ДЛЯ ЛИМИТА ХВОСТА] Растим хвост максимум до 200 элементов
+    let targetLength = Math.min(p.score, 200);
+
+    while (p.snake.length < targetLength) {
       let last = p.snake[p.snake.length - 1] || { x: p.x, y: p.y, angle: p.angle };
       p.snake.push({ x: last.x, y: last.y, angle: last.angle });
     }
-    while (p.snake.length > p.score) {
+    while (p.snake.length > targetLength) {
       p.snake.pop();
     }
 
@@ -270,13 +274,13 @@ setInterval(() => {
     }
   }
 
-  // БИТВА: Проверка столкновений (ИСПРАВЛЕНО!)
+  // БИТВА: Проверка столкновений
   for (let id in players) {
     let p = players[id];
     if (p.spawnProtection > 0) continue;
 
     for (let otherId in players) {
-      if (id === otherId) continue; // ФИКС БАГА: Об свой хвост умереть больше нельзя!
+      if (id === otherId) continue; // Об свой хвост умереть нельзя
 
       let other = players[otherId];
       for (let i = 0; i < other.snake.length; i++) {
@@ -318,5 +322,5 @@ setInterval(() => {
 
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
-  console.log(`Сервер запущен. Смерть об себя исправлена.`);
+  console.log(`Сервер запущен. Хвост ограничен лимитом в 200 сегментов.`);
 });
