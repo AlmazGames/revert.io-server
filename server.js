@@ -12,7 +12,7 @@ const io = require('socket.io')(http, {
 });
 
 app.get('/', (req, res) => {
-  res.send('Сервер Revert.io активен: Бот больше не кружится вокруг еды! Хвост ограничен до 200.');
+  res.send('Сервер Revert.io активен: Спавнятся 3 уникальных бота, ИИ оптимизирован, лимит хвоста 200!');
 });
 
 const WORLD_SIZE = 4000;
@@ -20,15 +20,22 @@ const MAX_FOOD = 500;
 const TARGET_DIST = 9;
 const MAX_SEGMENT_RADIUS = 14;
 
-// Скины для бота
+// Скины для ботов (будут выбираться случайно)
 const BOT_SKINS = [
     { head: ["#ffffff", "#bd00ff", "#4b0082"], body: ["#df80ff", "#8a2be2", "#1f0033"], tail: ["#ffffff", "#00ffff", "#008b8b"] },
-    { head: ["#ffffff", "#ff4500", "#8b0000"], body: ["#ffa07a", "#d2691e", "#3a1200"], tail: ["#ffffff", "#ffcc00", "#8b6508"] }
+    { head: ["#ffffff", "#ff4500", "#8b0000"], body: ["#ffa07a", "#d2691e", "#3a1200"], tail: ["#ffffff", "#ffcc00", "#8b6508"] },
+    { head: ["#ffffff", "#00ff00", "#006400"], body: ["#98fb98", "#228b22", "#002200"], tail: ["#ffffff", "#ffff00", "#808000"] }
+];
+
+// [НОВОЕ] Настройки для трёх разных ботов
+const BOTS_CONFIG = [
+  { id: "SERVER_BOT_01", name: "NeonViper [BOT]" },
+  { id: "SERVER_BOT_02", name: "CyberPhantom [BOT]" },
+  { id: "SERVER_BOT_03", name: "GlitchHunter [BOT]" }
 ];
 
 let players = {};
 let foods = [];
-let botId = "SERVER_BOT_01"; 
 
 function createFoodItem() {
   return {
@@ -44,10 +51,10 @@ for (let i = 0; i < MAX_FOOD; i++) {
   foods.push(createFoodItem());
 }
 
-// Функция для создания/возрождения бота
-function spawnServerBot() {
-    let startX = WORLD_SIZE / 2 + (Math.random() * 1000 - 500);
-    let startY = WORLD_SIZE / 2 + (Math.random() * 1000 - 500);
+// [ИЗМЕНЕНО] Функция спавна конкретного бота по его конфигурации
+function spawnServerBot(botConfig) {
+    let startX = WORLD_SIZE / 2 + (Math.random() * 1400 - 700);
+    let startY = WORLD_SIZE / 2 + (Math.random() * 1400 - 700);
     let initialScore = 50; 
     let initialSnake = [];
     let startAngle = Math.random() * Math.PI * 2;
@@ -56,9 +63,9 @@ function spawnServerBot() {
       initialSnake.push({ x: startX, y: startY + (i * TARGET_DIST), angle: startAngle });
     }
 
-    players[botId] = {
-      id: botId,
-      name: "SmartBot [BOT]",
+    players[botConfig.id] = {
+      id: botConfig.id,
+      name: botConfig.name,
       x: startX,
       y: startY,
       angle: startAngle,
@@ -72,11 +79,12 @@ function spawnServerBot() {
       isBot: true 
     };
     
-    io.emit('new_player', players[botId]);
-    console.log("Серверный бот заспавнен.");
+    io.emit('new_player', players[botConfig.id]);
+    console.log(`Бот ${botConfig.name} успешно заспавнен.`);
 }
 
-spawnServerBot();
+// Спавним всех 3 ботов при запуске сервера
+BOTS_CONFIG.forEach(bot => spawnServerBot(bot));
 
 
 function dropFoodOnDeath(snake, skin) {
@@ -157,53 +165,53 @@ io.on('connection', (socket) => {
   });
 });
 
-// ИСПРАВЛЕННЫЙ ЦИКЛ ДЛЯ ИИ БОТА (10 FPS / каждые 100мс)
+// [ИЗМЕНЕНО] УНИВЕРСАЛЬНЫЙ ЦИКЛ ИИ ДЛЯ ВСЕХ БОТОВ НА КАРТЕ (10 FPS)
 const AI_DT = 1000 / 10;
 setInterval(() => {
-    if (!players[botId] || !players[botId].isBot) return;
-    let p = players[botId];
+    // Пробегаемся по всем игрокам на сервере
+    for (let id in players) {
+        let p = players[id];
+        if (!p.isBot) continue; // Если это реальный игрок — пропускаем, управляем только ботами!
 
-    if (foods.length > 0) {
-        let minDistSq = Infinity;
-        let targetFood = null;
-        
-        for (let f of foods) {
-            let dx = f.x - p.x;
-            let dy = f.y - p.y;
-            let distSq = dx*dx + dy*dy;
-            let dist = Math.sqrt(distSq);
+        if (foods.length > 0) {
+            let minDistSq = Infinity;
+            let targetFood = null;
+            
+            for (let f of foods) {
+                let dx = f.x - p.x;
+                let dy = f.y - p.y;
+                let distSq = dx*dx + dy*dy;
+                let dist = Math.sqrt(distSq);
 
-            // [ФИКС БАГА КРУЖЕНИЯ] Проверяем, сможем ли мы физически повернуться к этой еде
-            let angleToFood = Math.atan2(dy, dx);
-            let angleDiff = angleToFood - p.angle;
-            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                // Защита от кружения на месте
+                let angleToFood = Math.atan2(dy, dx);
+                let angleDiff = angleToFood - p.angle;
+                while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
 
-            // Если еда ближе 75px (внутри круга разворота) и угол к ней больше ~45 градусов (0.8 радиан),
-            // бот просто проигнорирует её, чтобы не застрять в бесконечной орбите вращения.
-            if (dist < 75 && Math.abs(angleDiff) > 0.8) {
-                continue; 
+                if (dist < 75 && Math.abs(angleDiff) > 0.8) {
+                    continue; 
+                }
+
+                if (distSq < minDistSq) {
+                    minDistSq = distSq;
+                    targetFood = f;
+                }
             }
-
-            if (distSq < minDistSq) {
-                minDistSq = distSq;
-                targetFood = f;
+            
+            if (targetFood) {
+                p.targetAngle = Math.atan2(targetFood.y - p.y, targetFood.x - p.x);
+            } else {
+                p.targetAngle = p.angle;
             }
+            
+            p.isBoosting = false; 
         }
-        
-        if (targetFood) {
-            p.targetAngle = Math.atan2(targetFood.y - p.y, targetFood.x - p.x);
-        } else {
-            // Если ВСЯ ближайшая еда в слепой зоне, летим прямо, чтобы отдалиться и развернуться петлёй
-            p.targetAngle = p.angle;
-        }
-        
-        p.isBoosting = false; 
     }
 }, AI_DT);
 
 
-// ОСНОВНОЙ ИГРОВОЙ ЦИКЛ (60 FPS - Физика и Движение)
+// ОСНОВНОЙ ИГРОВОЙ ЦИКЛ (60 FPS - Физика и Движение всех объектов)
 const dt = 1000 / 60;
 setInterval(() => {
   let deadPlayers = [];
@@ -263,7 +271,7 @@ setInterval(() => {
       current.angle = Math.atan2(dy, dx);
     }
 
-    // Тело растет только до 200 элементов, сохраняя стабильность сервера
+    // Хвост растет максимум до 200 элементов
     let targetLength = Math.min(p.score, 200);
 
     while (p.snake.length < targetLength) {
@@ -297,7 +305,7 @@ setInterval(() => {
     if (p.spawnProtection > 0) continue;
 
     for (let otherId in players) {
-      if (id === otherId) continue; // Об свой хвост умереть нельзя
+      if (id === otherId) continue; // Об свой собственный хвост умереть нельзя
 
       let other = players[otherId];
       for (let i = 0; i < other.snake.length; i++) {
@@ -316,18 +324,23 @@ setInterval(() => {
     }
   }
 
-  // Обработка смертей
+  // Обработка смертей игроков и ботов
   deadPlayers.forEach(d => {
     if (players[d.id]) {
+      const isBot = players[d.id].isBot;
       const droppedFoods = dropFoodOnDeath(d.snake, d.skin);
       foods = foods.concat(droppedFoods);
       io.emit('foods_spawned', droppedFoods);
       io.emit('player_exploded', { x: d.x, y: d.y, color: d.skin ? d.skin.head[1] : '#66fcf1' });
       io.emit('player_died_notification', d.id);
       
-      if (players[d.id].isBot) {
+      // [ИЗМЕНЕНО] Если умер бот, находим его конфиг по ID и респавним под его же именем!
+      if (isBot) {
+          const deadBotConfig = BOTS_CONFIG.find(b => b.id === d.id);
           delete players[d.id];
-          spawnServerBot(); 
+          if (deadBotConfig) {
+              spawnServerBot(deadBotConfig); 
+          }
       } else {
           delete players[d.id];
       }
@@ -339,5 +352,5 @@ setInterval(() => {
 
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
-  console.log(`Сервер запущен. У ИИ исправлен баг бесконечного вращения.`);
+  console.log(`Сервер запущен. На карте активны 3 бота с именами.`);
 });
