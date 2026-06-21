@@ -12,7 +12,7 @@ const io = require('socket.io')(http, {
 });
 
 app.get('/', (req, res) => {
-  res.send('Сервер Revert.io активен: Хвост ограничен до 200 сегментов, ИИ бота оптимизирован (10 FPS)!');
+  res.send('Сервер Revert.io активен: Бот больше не кружится вокруг еды! Хвост ограничен до 200.');
 });
 
 const WORLD_SIZE = 4000;
@@ -58,7 +58,7 @@ function spawnServerBot() {
 
     players[botId] = {
       id: botId,
-      name: "OptimizedBot [BOT]",
+      name: "SmartBot [BOT]",
       x: startX,
       y: startY,
       angle: startAngle,
@@ -157,7 +157,7 @@ io.on('connection', (socket) => {
   });
 });
 
-// ОТДЕЛЬНЫЙ ЦИКЛ ДЛЯ ИИ БОТА (10 FPS / каждые 100мс)
+// ИСПРАВЛЕННЫЙ ЦИКЛ ДЛЯ ИИ БОТА (10 FPS / каждые 100мс)
 const AI_DT = 1000 / 10;
 setInterval(() => {
     if (!players[botId] || !players[botId].isBot) return;
@@ -166,10 +166,25 @@ setInterval(() => {
     if (foods.length > 0) {
         let minDistSq = Infinity;
         let targetFood = null;
+        
         for (let f of foods) {
             let dx = f.x - p.x;
             let dy = f.y - p.y;
             let distSq = dx*dx + dy*dy;
+            let dist = Math.sqrt(distSq);
+
+            // [ФИКС БАГА КРУЖЕНИЯ] Проверяем, сможем ли мы физически повернуться к этой еде
+            let angleToFood = Math.atan2(dy, dx);
+            let angleDiff = angleToFood - p.angle;
+            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+
+            // Если еда ближе 75px (внутри круга разворота) и угол к ней больше ~45 градусов (0.8 радиан),
+            // бот просто проигнорирует её, чтобы не застрять в бесконечной орбите вращения.
+            if (dist < 75 && Math.abs(angleDiff) > 0.8) {
+                continue; 
+            }
+
             if (distSq < minDistSq) {
                 minDistSq = distSq;
                 targetFood = f;
@@ -178,6 +193,9 @@ setInterval(() => {
         
         if (targetFood) {
             p.targetAngle = Math.atan2(targetFood.y - p.y, targetFood.x - p.x);
+        } else {
+            // Если ВСЯ ближайшая еда в слепой зоне, летим прямо, чтобы отдалиться и развернуться петлёй
+            p.targetAngle = p.angle;
         }
         
         p.isBoosting = false; 
@@ -211,7 +229,6 @@ setInterval(() => {
       p.boostTimer += dt;
       if (p.boostTimer >= 1000) {
         p.score--;
-        // Уменьшаем хвост при ускорении только если он реально есть в массиве
         if (p.snake.length > 0) p.snake.pop();
         p.boostTimer %= 1000;
       }
@@ -246,7 +263,7 @@ setInterval(() => {
       current.angle = Math.atan2(dy, dx);
     }
 
-    // [ИЗМЕНЕНО ДЛЯ ЛИМИТА ХВОСТА] Растим хвост максимум до 200 элементов
+    // Тело растет только до 200 элементов, сохраняя стабильность сервера
     let targetLength = Math.min(p.score, 200);
 
     while (p.snake.length < targetLength) {
@@ -322,5 +339,5 @@ setInterval(() => {
 
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
-  console.log(`Сервер запущен. Хвост ограничен лимитом в 200 сегментов.`);
+  console.log(`Сервер запущен. У ИИ исправлен баг бесконечного вращения.`);
 });
