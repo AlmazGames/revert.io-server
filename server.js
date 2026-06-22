@@ -12,7 +12,7 @@ const io = require('socket.io')(http, {
 });
 
 app.get('/', (req, res) => {
-  res.send('Сервер Revert.io активен: Хвост безопасен, ТОП обновляется раз в 2 секунды, 4 замаскированных бота в игре!');
+  res.send('Сервер Revert.io активен: Боты поумнели, хвост безопасен, ТОП раз в 2 секунды!');
 });
 
 // ИГРОВЫЕ НАСТРОЙКИ
@@ -81,7 +81,12 @@ function spawnServerBot() {
       isBoosting: false,
       boostTimer: 0,
       spawnProtection: 2000, 
-      isBot: true 
+      isBot: true,
+      // Поля умного сдерживания зацикливания:
+      stuckTimer: 0,
+      ignoredFoodId: null,
+      lastFoodId: null,
+      foodTargetTicks: 0
     };
     
     io.emit('new_player', players[botId]);
@@ -171,18 +176,30 @@ io.on('connection', (socket) => {
   });
 });
 
-// ЦИКЛ МОЗГОВ ДЛЯ ВСЕХ БОТОВ (10 FPS)
+// [ОБНОВЛЕНО] ЦИКЛ МОЗГОВ ДЛЯ ВСЕХ БОТОВ (10 FPS) — С АНТИ-ОРБИТАЛЬНОЙ СИСТЕМОЙ
 const AI_DT = 1000 / 10;
 setInterval(() => {
     for (let id in players) {
         let p = players[id];
         if (!p.isBot) continue; 
 
+        // Если запущен маневр отъезда от заклинившей еды
+        if (p.stuckTimer > 0) {
+            p.stuckTimer--;
+            if (p.stuckTimer === 0) {
+                p.ignoredFoodId = null; // Разбаниваем недоступную еду после отхода
+            }
+            continue; // Не меняем курс во время спасительного отворота
+        }
+
         if (foods.length > 0) {
             let minDistSq = Infinity;
             let targetFood = null;
             
+            // Ищем ближайшую еду (игнорируем ту, вокруг которой крутились)
             for (let f of foods) {
+                if (f.id === p.ignoredFoodId) continue;
+                
                 let dx = f.x - p.x;
                 let dy = f.y - p.y;
                 let distSq = dx*dx + dy*dy;
@@ -191,8 +208,28 @@ setInterval(() => {
                     targetFood = f;
                 }
             }
+
             if (targetFood) {
-                p.targetAngle = Math.atan2(targetFood.y - p.y, targetFood.x - p.x);
+                // Считаем тики удержания одной и той же цели
+                if (targetFood.id === p.lastFoodId) {
+                    p.foodTargetTicks = (p.foodTargetTicks || 0) + 1;
+                } else {
+                    p.lastFoodId = targetFood.id;
+                    p.foodTargetTicks = 0;
+                }
+
+                // Если бот кружится у точки больше 2.5 секунд (25 тиков ИИ) и не съел её
+                if (p.foodTargetTicks > 25) {
+                    p.ignoredFoodId = targetFood.id; // Временный бан точки
+                    p.stuckTimer = 15; // 1.5 секунды летим прочь (15 тиков)
+                    
+                    // Резко отворачиваем влево или вправо на 100 градусов, ломая круг вращения
+                    p.targetAngle = p.angle + (Math.random() > 0.5 ? Math.PI / 1.8 : -Math.PI / 1.8);
+                    p.foodTargetTicks = 0;
+                } else {
+                    // Обычное следование к еде
+                    p.targetAngle = Math.atan2(targetFood.y - p.y, targetFood.x - p.x);
+                }
             }
             
             p.isBoosting = (p.score > 50 && Math.random() < 0.05); 
@@ -242,13 +279,13 @@ setInterval(() => {
       p.snake[0].angle = p.angle;
     }
 
-    // Проверка границ карты
+    // Границы карты
     if (p.x < 0 || p.x > WORLD_SIZE || p.y < 0 || p.y > WORLD_SIZE) {
       deadPlayers.push({ id: id, x: p.x, y: p.y, skin: p.skin, snake: p.snake });
       continue;
     }
 
-    // Движение хвоста
+    // Передвижение хвоста
     for (let i = 1; i < p.snake.length; i++) {
       let current = p.snake[i];
       let prev = p.snake[i - 1];
@@ -270,7 +307,7 @@ setInterval(() => {
       p.snake.pop();
     }
 
-    // Поедание корма
+    // Сбор корма
     for (let i = foods.length - 1; i >= 0; i--) {
       let f = foods[i];
       let fDx = p.x - f.x;
@@ -288,13 +325,13 @@ setInterval(() => {
     }
   }
 
-  // ОБСЛУЖИВАНИЕ СТОЛКНОВЕНИЙ (БИТВА)
+  // ОБСЛУЖИВАНИЕ СТОЛКНОВЕНИЙ
   for (let id in players) {
     let p = players[id];
     if (p.spawnProtection > 0) continue;
 
     for (let otherId in players) {
-      // ФИКС: Если это один и тот же игрок — полностью игнорируем столкновение!
+      // Игнорируем себя — смерть о свой хвост выключена!
       if (id === otherId) continue; 
 
       let other = players[otherId];
@@ -315,7 +352,7 @@ setInterval(() => {
     }
   }
 
-  // Обработка гибели
+  // Смерти
   deadPlayers.forEach(d => {
     if (players[d.id]) {
       const droppedFoods = dropFoodOnDeath(d.snake, d.skin);
@@ -335,8 +372,8 @@ setInterval(() => {
 }, dt);
 
 
-// СЕТЕВЫЕ ПОТОКИ ВЕБ-СОКЕТОВ
-// 1. Поток игровых позиций змеек (20 FPS / Каждые 50мс для плавной интерполяции)
+// СЕТЕВЫЕ ИНТЕРВАЛЫ
+// 1. Позиции игроков (20 FPS / Каждые 50мс для плавной интерполяции)
 setInterval(() => {
   if (Object.keys(players).length > 0) {
     io.emit('heartbeat', players);
@@ -358,5 +395,5 @@ setInterval(() => {
 
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
-  console.log(`Сервер запущен. Порт: ${PORT}. Оптимальная конфигурация сети и безопасности хвоста включена.`);
+  console.log(`Сервер перезапущен. Умный ИИ ботов активен на порту: ${PORT}`);
 });
