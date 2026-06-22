@@ -4,7 +4,7 @@ const http = require('http').createServer(app);
 
 const io = require('socket.io')(http, {
   cors: {
-    origin: "https://almazgames.github.io", // Твой URL GitHub Pages
+    origin: "https://almazgames.github.io", // Замените на свой URL GitHub Pages
     methods: ["GET", "POST"],
     credentials: true
   },
@@ -12,7 +12,7 @@ const io = require('socket.io')(http, {
 });
 
 app.get('/', (req, res) => {
-  res.send('Сервер Revert.io активен: Спавнятся 3 уникальных бота, ИИ оптимизирован, лимит хвоста 200!');
+  res.send('Сервер Revert.io активен: Сетевые потоки разделены (Радар 0.5с, Топ 2с, Движение 20 FPS)!');
 });
 
 const WORLD_SIZE = 4000;
@@ -20,22 +20,15 @@ const MAX_FOOD = 500;
 const TARGET_DIST = 9;
 const MAX_SEGMENT_RADIUS = 14;
 
-// Скины для ботов (будут выбираться случайно)
+// Скины для бота
 const BOT_SKINS = [
     { head: ["#ffffff", "#bd00ff", "#4b0082"], body: ["#df80ff", "#8a2be2", "#1f0033"], tail: ["#ffffff", "#00ffff", "#008b8b"] },
-    { head: ["#ffffff", "#ff4500", "#8b0000"], body: ["#ffa07a", "#d2691e", "#3a1200"], tail: ["#ffffff", "#ffcc00", "#8b6508"] },
-    { head: ["#ffffff", "#00ff00", "#006400"], body: ["#98fb98", "#228b22", "#002200"], tail: ["#ffffff", "#ffff00", "#808000"] }
-];
-
-// [НОВОЕ] Настройки для трёх разных ботов
-const BOTS_CONFIG = [
-  { id: "SERVER_BOT_01", name: "NeonViper [BOT]" },
-  { id: "SERVER_BOT_02", name: "CyberPhantom [BOT]" },
-  { id: "SERVER_BOT_03", name: "GlitchHunter [BOT]" }
+    { head: ["#ffffff", "#ff4500", "#8b0000"], body: ["#ffa07a", "#d2691e", "#3a1200"], tail: ["#ffffff", "#ffcc00", "#8b6508"] }
 ];
 
 let players = {};
 let foods = [];
+let botId = "SERVER_BOT_01"; 
 
 function createFoodItem() {
   return {
@@ -51,10 +44,10 @@ for (let i = 0; i < MAX_FOOD; i++) {
   foods.push(createFoodItem());
 }
 
-// [ИЗМЕНЕНО] Функция спавна конкретного бота по его конфигурации
-function spawnServerBot(botConfig) {
-    let startX = WORLD_SIZE / 2 + (Math.random() * 1400 - 700);
-    let startY = WORLD_SIZE / 2 + (Math.random() * 1400 - 700);
+// Функция для создания/возрождения бота
+function spawnServerBot() {
+    let startX = WORLD_SIZE / 2 + (Math.random() * 1000 - 500);
+    let startY = WORLD_SIZE / 2 + (Math.random() * 1000 - 500);
     let initialScore = 50; 
     let initialSnake = [];
     let startAngle = Math.random() * Math.PI * 2;
@@ -63,9 +56,9 @@ function spawnServerBot(botConfig) {
       initialSnake.push({ x: startX, y: startY + (i * TARGET_DIST), angle: startAngle });
     }
 
-    players[botConfig.id] = {
-      id: botConfig.id,
-      name: botConfig.name,
+    players[botId] = {
+      id: botId,
+      name: "OptimizedBot [BOT]",
       x: startX,
       y: startY,
       angle: startAngle,
@@ -79,13 +72,11 @@ function spawnServerBot(botConfig) {
       isBot: true 
     };
     
-    io.emit('new_player', players[botConfig.id]);
-    console.log(`Бот ${botConfig.name} успешно заспавнен.`);
+    io.emit('new_player', players[botId]);
+    console.log("Серверный бот заспавнен.");
 }
 
-// Спавним всех 3 ботов при запуске сервера
-BOTS_CONFIG.forEach(bot => spawnServerBot(bot));
-
+spawnServerBot();
 
 function dropFoodOnDeath(snake, skin) {
   let spawnedFoods = [];
@@ -165,60 +156,39 @@ io.on('connection', (socket) => {
   });
 });
 
-// [ИЗМЕНЕНО] УНИВЕРСАЛЬНЫЙ ЦИКЛ ИИ ДЛЯ ВСЕХ БОТОВ НА КАРТЕ (10 FPS)
+// ЦИКЛ ДЛЯ ИИ БОТА (10 FPS / каждые 100мс)
 const AI_DT = 1000 / 10;
 setInterval(() => {
-    // Пробегаемся по всем игрокам на сервере
-    for (let id in players) {
-        let p = players[id];
-        if (!p.isBot) continue; // Если это реальный игрок — пропускаем, управляем только ботами!
+    if (!players[botId] || !players[botId].isBot) return;
+    let p = players[botId];
 
-        if (foods.length > 0) {
-            let minDistSq = Infinity;
-            let targetFood = null;
-            
-            for (let f of foods) {
-                let dx = f.x - p.x;
-                let dy = f.y - p.y;
-                let distSq = dx*dx + dy*dy;
-                let dist = Math.sqrt(distSq);
-
-                // Защита от кружения на месте
-                let angleToFood = Math.atan2(dy, dx);
-                let angleDiff = angleToFood - p.angle;
-                while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-                while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-
-                if (dist < 75 && Math.abs(angleDiff) > 0.8) {
-                    continue; 
-                }
-
-                if (distSq < minDistSq) {
-                    minDistSq = distSq;
-                    targetFood = f;
-                }
+    if (foods.length > 0) {
+        let minDistSq = Infinity;
+        let targetFood = null;
+        for (let f of foods) {
+            let dx = f.x - p.x;
+            let dy = f.y - p.y;
+            let distSq = dx*dx + dy*dy;
+            if (distSq < minDistSq) {
+                minDistSq = distSq;
+                targetFood = f;
             }
-            
-            if (targetFood) {
-                p.targetAngle = Math.atan2(targetFood.y - p.y, targetFood.x - p.x);
-            } else {
-                p.targetAngle = p.angle;
-            }
-            
-            p.isBoosting = false; 
         }
+        if (targetFood) {
+            p.targetAngle = Math.atan2(targetFood.y - p.y, targetFood.x - p.x);
+        }
+        p.isBoosting = false; 
     }
 }, AI_DT);
 
 
-// ОСНОВНОЙ ИГРОВОЙ ЦИКЛ (60 FPS - Физика и Движение всех объектов)
+// ЧИСТЫЙ ЦИКЛ ФИЗИКИ (60 FPS - Без сетевой рассылки!)
 const dt = 1000 / 60;
 setInterval(() => {
   let deadPlayers = [];
 
   for (let id in players) {
     let p = players[id];
-    
     if (p.spawnProtection > 0) p.spawnProtection -= dt;
 
     let angleDiff = p.targetAngle - p.angle;
@@ -271,14 +241,11 @@ setInterval(() => {
       current.angle = Math.atan2(dy, dx);
     }
 
-    // Хвост растет максимум до 200 элементов
-    let targetLength = Math.min(p.score, 200);
-
-    while (p.snake.length < targetLength) {
+    while (p.snake.length < p.score) {
       let last = p.snake[p.snake.length - 1] || { x: p.x, y: p.y, angle: p.angle };
       p.snake.push({ x: last.x, y: last.y, angle: last.angle });
     }
-    while (p.snake.length > targetLength) {
+    while (p.snake.length > p.score) {
       p.snake.pop();
     }
 
@@ -305,10 +272,10 @@ setInterval(() => {
     if (p.spawnProtection > 0) continue;
 
     for (let otherId in players) {
-      if (id === otherId) continue; // Об свой собственный хвост умереть нельзя
-
       let other = players[otherId];
-      for (let i = 0; i < other.snake.length; i++) {
+      let startIdx = (id === otherId) ? 4 : 0; 
+
+      for (let i = startIdx; i < other.snake.length; i++) {
         let seg = other.snake[i];
         let hitDx = p.x - seg.x;
         let hitDy = p.y - seg.y;
@@ -324,33 +291,65 @@ setInterval(() => {
     }
   }
 
-  // Обработка смертей игроков и ботов
+  // Обработка смертей
   deadPlayers.forEach(d => {
     if (players[d.id]) {
-      const isBot = players[d.id].isBot;
       const droppedFoods = dropFoodOnDeath(d.snake, d.skin);
       foods = foods.concat(droppedFoods);
       io.emit('foods_spawned', droppedFoods);
       io.emit('player_exploded', { x: d.x, y: d.y, color: d.skin ? d.skin.head[1] : '#66fcf1' });
       io.emit('player_died_notification', d.id);
       
-      // [ИЗМЕНЕНО] Если умер бот, находим его конфиг по ID и респавним под его же именем!
-      if (isBot) {
-          const deadBotConfig = BOTS_CONFIG.find(b => b.id === d.id);
+      if (players[d.id].isBot) {
           delete players[d.id];
-          if (deadBotConfig) {
-              spawnServerBot(deadBotConfig); 
-          }
+          spawnServerBot(); 
       } else {
           delete players[d.id];
       }
     }
   });
-
-  io.emit('heartbeat', players);
 }, dt);
+
+
+// ========================================================
+// [ОПТИМИЗАЦИЯ СЕТИ]: РАЗДЕЛЬНЫЕ СЕТЕВЫЕ ПОТОКИ ВЕБ-СОКЕТОВ
+// ========================================================
+
+// 1. Поток игровых позиций змеек (20 FPS / Каждые 50мс вместо 60 FPS)
+setInterval(() => {
+  if (Object.keys(players).length > 0) {
+    io.emit('heartbeat', players);
+  }
+}, 50);
+
+// 2. [НОВОЕ] Поток данных РАДАРА (Каждые 0.5 секунды / 500мс)
+setInterval(() => {
+  if (Object.keys(players).length === 0) return;
+  
+  // Собираем ультра-лёгкий массив только из координат голов
+  const radarData = Object.values(players).map(p => ({
+    id: p.id,
+    x: p.x,
+    y: p.y
+  }));
+  
+  io.emit('radar_update', radarData);
+}, 500);
+
+// 3. [НОВОЕ] Поток ЛИДЕРБОРДА (Каждые 2 секунды / 2000мс)
+setInterval(() => {
+  if (Object.keys(players).length === 0) return;
+
+  const leaderboardData = Object.values(players)
+    .map(p => ({ id: p.id, name: p.name, score: p.score }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10); // Отдаем строго ТОП-10
+
+  io.emit('leaderboard_update', leaderboardData);
+}, 2000);
+
 
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
-  console.log(`Сервер запущен. На карте активны 3 бота с именами.`);
+  console.log(`Сервер запущен и оптимизирован. Сетевой трафик дефрагментирован.`);
 });
