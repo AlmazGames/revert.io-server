@@ -12,7 +12,7 @@ const io = require('socket.io')(http, {
 });
 
 app.get('/', (req, res) => {
-  res.send('Сервер Revert.io активен: Боты поумнели, хвост безопасен, ТОП раз в 2 секунды!');
+  res.send('Сервер Revert.io активен: ТОП-10 везде, Хвост безопасен, Умные боты онлайн!');
 });
 
 // ИГРОВЫЕ НАСТРОЙКИ
@@ -82,7 +82,6 @@ function spawnServerBot() {
       boostTimer: 0,
       spawnProtection: 2000, 
       isBot: true,
-      // Поля умного сдерживания зацикливания:
       stuckTimer: 0,
       ignoredFoodId: null,
       lastFoodId: null,
@@ -92,12 +91,10 @@ function spawnServerBot() {
     io.emit('new_player', players[botId]);
 }
 
-// Заполняем карту ботами при старте
 for (let i = 0; i < MAX_SERVER_BOTS; i++) {
     spawnServerBot();
 }
 
-// СПАВН МАССЫ ПРИ СМЕРТИ
 function dropFoodOnDeath(snake, skin) {
   let spawnedFoods = [];
   if (snake && snake.length > 0) {
@@ -176,30 +173,25 @@ io.on('connection', (socket) => {
   });
 });
 
-// [ОБНОВЛЕНО] ЦИКЛ МОЗГОВ ДЛЯ ВСЕХ БОТОВ (10 FPS) — С АНТИ-ОРБИТАЛЬНОЙ СИСТЕМОЙ
+// ЦИКЛ МОЗГОВ ДЛЯ ВСЕХ БОТОВ (10 FPS)
 const AI_DT = 1000 / 10;
 setInterval(() => {
     for (let id in players) {
         let p = players[id];
         if (!p.isBot) continue; 
 
-        // Если запущен маневр отъезда от заклинившей еды
         if (p.stuckTimer > 0) {
             p.stuckTimer--;
-            if (p.stuckTimer === 0) {
-                p.ignoredFoodId = null; // Разбаниваем недоступную еду после отхода
-            }
-            continue; // Не меняем курс во время спасительного отворота
+            if (p.stuckTimer === 0) p.ignoredFoodId = null;
+            continue; 
         }
 
         if (foods.length > 0) {
             let minDistSq = Infinity;
             let targetFood = null;
             
-            // Ищем ближайшую еду (игнорируем ту, вокруг которой крутились)
             for (let f of foods) {
                 if (f.id === p.ignoredFoodId) continue;
-                
                 let dx = f.x - p.x;
                 let dy = f.y - p.y;
                 let distSq = dx*dx + dy*dy;
@@ -210,7 +202,6 @@ setInterval(() => {
             }
 
             if (targetFood) {
-                // Считаем тики удержания одной и той же цели
                 if (targetFood.id === p.lastFoodId) {
                     p.foodTargetTicks = (p.foodTargetTicks || 0) + 1;
                 } else {
@@ -218,25 +209,19 @@ setInterval(() => {
                     p.foodTargetTicks = 0;
                 }
 
-                // Если бот кружится у точки больше 2.5 секунд (25 тиков ИИ) и не съел её
                 if (p.foodTargetTicks > 25) {
-                    p.ignoredFoodId = targetFood.id; // Временный бан точки
-                    p.stuckTimer = 15; // 1.5 секунды летим прочь (15 тиков)
-                    
-                    // Резко отворачиваем влево или вправо на 100 градусов, ломая круг вращения
+                    p.ignoredFoodId = targetFood.id; 
+                    p.stuckTimer = 15; 
                     p.targetAngle = p.angle + (Math.random() > 0.5 ? Math.PI / 1.8 : -Math.PI / 1.8);
                     p.foodTargetTicks = 0;
                 } else {
-                    // Обычное следование к еде
                     p.targetAngle = Math.atan2(targetFood.y - p.y, targetFood.x - p.x);
                 }
             }
-            
             p.isBoosting = (p.score > 50 && Math.random() < 0.05); 
         }
     }
 }, AI_DT);
-
 
 // ЯДРО ФИЗИКИ СЕРВЕРА (60 FPS)
 const dt = 1000 / 60;
@@ -279,13 +264,11 @@ setInterval(() => {
       p.snake[0].angle = p.angle;
     }
 
-    // Границы карты
     if (p.x < 0 || p.x > WORLD_SIZE || p.y < 0 || p.y > WORLD_SIZE) {
       deadPlayers.push({ id: id, x: p.x, y: p.y, skin: p.skin, snake: p.snake });
       continue;
     }
 
-    // Передвижение хвоста
     for (let i = 1; i < p.snake.length; i++) {
       let current = p.snake[i];
       let prev = p.snake[i - 1];
@@ -307,7 +290,6 @@ setInterval(() => {
       p.snake.pop();
     }
 
-    // Сбор корма
     for (let i = foods.length - 1; i >= 0; i--) {
       let f = foods[i];
       let fDx = p.x - f.x;
@@ -325,13 +307,12 @@ setInterval(() => {
     }
   }
 
-  // ОБСЛУЖИВАНИЕ СТОЛКНОВЕНИЙ
+  // ОБСЛУЖИВАНИЕ СТОЛКНОВЕНИЙ (Смерть об свой хвост полностью отключена)
   for (let id in players) {
     let p = players[id];
     if (p.spawnProtection > 0) continue;
 
     for (let otherId in players) {
-      // Игнорируем себя — смерть о свой хвост выключена!
       if (id === otherId) continue; 
 
       let other = players[otherId];
@@ -352,7 +333,6 @@ setInterval(() => {
     }
   }
 
-  // Смерти
   deadPlayers.forEach(d => {
     if (players[d.id]) {
       const droppedFoods = dropFoodOnDeath(d.snake, d.skin);
@@ -363,37 +343,32 @@ setInterval(() => {
       
       let wasBot = players[d.id].isBot;
       delete players[d.id];
-
-      if (wasBot) {
-          spawnServerBot(); 
-      }
+      if (wasBot) spawnServerBot(); 
     }
   });
 }, dt);
 
-
 // СЕТЕВЫЕ ИНТЕРВАЛЫ
-// 1. Позиции игроков (20 FPS / Каждые 50мс для плавной интерполяции)
+// 1. Позиции (20 FPS)
 setInterval(() => {
   if (Object.keys(players).length > 0) {
     io.emit('heartbeat', players);
   }
 }, 50);
 
-// 2. Поток ЛИДЕРБОРДА (Каждые 2 секунды / 2000мс)
+// 2. Строгий ТОП-10 для всех досок (Раз в 2 секунды)
 setInterval(() => {
   if (Object.keys(players).length === 0) return;
 
   const leaderboardData = Object.values(players)
     .map(p => ({ id: p.id, name: p.name, score: p.score }))
     .sort((a, b) => b.score - a.score)
-    .slice(0, 10); 
+    .slice(0, 10); // Строго ТОП-10
 
   io.emit('leaderboard_update', leaderboardData);
 }, 2000);
 
-
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
-  console.log(`Сервер перезапущен. Умный ИИ ботов активен на порту: ${PORT}`);
+  console.log(`Сервер Revert.io запущен. Порт: ${PORT}. Единый ТОП-10 активирован.`);
 });
