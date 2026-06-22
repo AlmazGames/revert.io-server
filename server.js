@@ -4,7 +4,7 @@ const http = require('http').createServer(app);
 
 const io = require('socket.io')(http, {
   cors: {
-    origin: "https://almazgames.github.io", // Замени на свой URL GitHub Pages
+    origin: "https://almazgames.github.io", // Твой URL на GitHub Pages
     methods: ["GET", "POST"],
     credentials: true
   },
@@ -12,15 +12,16 @@ const io = require('socket.io')(http, {
 });
 
 app.get('/', (req, res) => {
-  res.send('Сервер Revert.io активен: Боты маскируются под игроков (Английские никнеймы, без приписок BOT)!');
+  res.send('Сервер Revert.io активен: Хвост безопасен, ТОП обновляется раз в 2 секунды, 4 замаскированных бота в игре!');
 });
 
+// ИГРОВЫЕ НАСТРОЙКИ
 const WORLD_SIZE = 4000;
 const MAX_FOOD = 500;
 const TARGET_DIST = 9;
 const MAX_SEGMENT_RADIUS = 14;
 
-// [НОВОЕ] Настройки количества и маскировки ботов
+// НАСТРОЙКИ БОТОВ
 const MAX_SERVER_BOTS = 4; 
 const BOT_NAMES = [
     "Viper", "Shadow", "Neon_Glitch", "Alpha_Zero", "CyberGhost", 
@@ -28,7 +29,6 @@ const BOT_NAMES = [
     "GridRunner", "Maverick", "X_Pulse", "Zenith", "Quantum"
 ];
 
-// Скины для ботов
 const BOT_SKINS = [
     { head: ["#ffffff", "#bd00ff", "#4b0082"], body: ["#df80ff", "#8a2be2", "#1f0033"], tail: ["#ffffff", "#00ffff", "#008b8b"] },
     { head: ["#ffffff", "#ff4500", "#8b0000"], body: ["#ffa07a", "#d2691e", "#3a1200"], tail: ["#ffffff", "#ffcc00", "#8b6508"] },
@@ -38,6 +38,7 @@ const BOT_SKINS = [
 let players = {};
 let foods = [];
 
+// ГЕНЕРАЦИЯ ЕДЫ
 function createFoodItem() {
   return {
     id: Math.random().toString(36).substring(2, 9),
@@ -52,12 +53,12 @@ for (let i = 0; i < MAX_FOOD; i++) {
   foods.push(createFoodItem());
 }
 
-// [ОБНОВЛЕНО] Генерация уникального бота с английским именем без тегов
+// СПАВН СЕРВЕРНОГО БОТА
 function spawnServerBot() {
     let botId = "bot_" + Math.random().toString(36).substring(2, 9);
     let startX = WORLD_SIZE / 2 + (Math.random() * 1600 - 800);
     let startY = WORLD_SIZE / 2 + (Math.random() * 1600 - 800);
-    let initialScore = Math.floor(Math.random() * 15) + 35; // Начальная масса от 35 до 50
+    let initialScore = Math.floor(Math.random() * 15) + 35; 
     let initialSnake = [];
     let startAngle = Math.random() * Math.PI * 2;
     
@@ -65,12 +66,11 @@ function spawnServerBot() {
       initialSnake.push({ x: startX, y: startY + (i * TARGET_DIST), angle: startAngle });
     }
 
-    // Берём случайное имя из списка
     let randomName = BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)];
 
     players[botId] = {
       id: botId,
-      name: randomName, // Чистый никнейм без [BOT]
+      name: randomName, 
       x: startX,
       y: startY,
       angle: startAngle,
@@ -87,11 +87,12 @@ function spawnServerBot() {
     io.emit('new_player', players[botId]);
 }
 
-// Спавним стартовую пачку ботов при запуске сервера
+// Заполняем карту ботами при старте
 for (let i = 0; i < MAX_SERVER_BOTS; i++) {
     spawnServerBot();
 }
 
+// СПАВН МАССЫ ПРИ СМЕРТИ
 function dropFoodOnDeath(snake, skin) {
   let spawnedFoods = [];
   if (snake && snake.length > 0) {
@@ -110,6 +111,7 @@ function dropFoodOnDeath(snake, skin) {
   return spawnedFoods;
 }
 
+// ОБРАБОТКА ПОДКЛЮЧЕНИЙ
 io.on('connection', (socket) => {
   console.log(`Игрок подключился: ${socket.id}`);
   socket.emit('init_data', { foods: foods, players: players });
@@ -169,18 +171,17 @@ io.on('connection', (socket) => {
   });
 });
 
-// [ОБНОВЛЕНО] ЦИКЛ ДЛЯ ИИ БОТОВ (10 FPS) — теперь перебирает ВСЕХ ботов динамически
+// ЦИКЛ МОЗГОВ ДЛЯ ВСЕХ БОТОВ (10 FPS)
 const AI_DT = 1000 / 10;
 setInterval(() => {
     for (let id in players) {
         let p = players[id];
-        if (!p.isBot) continue; // Пропускаем реальных игроков
+        if (!p.isBot) continue; 
 
         if (foods.length > 0) {
             let minDistSq = Infinity;
             let targetFood = null;
             
-            // Ищем ближайшую еду
             for (let f of foods) {
                 let dx = f.x - p.x;
                 let dy = f.y - p.y;
@@ -194,14 +195,13 @@ setInterval(() => {
                 p.targetAngle = Math.atan2(targetFood.y - p.y, targetFood.x - p.x);
             }
             
-            // Боты иногда ускоряются ради фана, если масса позволяет
             p.isBoosting = (p.score > 50 && Math.random() < 0.05); 
         }
     }
 }, AI_DT);
 
 
-// ЧИСТЫЙ ЦИКЛ ФИЗИКИ (60 FPS)
+// ЯДРО ФИЗИКИ СЕРВЕРА (60 FPS)
 const dt = 1000 / 60;
 setInterval(() => {
   let deadPlayers = [];
@@ -242,11 +242,13 @@ setInterval(() => {
       p.snake[0].angle = p.angle;
     }
 
+    // Проверка границ карты
     if (p.x < 0 || p.x > WORLD_SIZE || p.y < 0 || p.y > WORLD_SIZE) {
       deadPlayers.push({ id: id, x: p.x, y: p.y, skin: p.skin, snake: p.snake });
       continue;
     }
 
+    // Движение хвоста
     for (let i = 1; i < p.snake.length; i++) {
       let current = p.snake[i];
       let prev = p.snake[i - 1];
@@ -268,6 +270,7 @@ setInterval(() => {
       p.snake.pop();
     }
 
+    // Поедание корма
     for (let i = foods.length - 1; i >= 0; i--) {
       let f = foods[i];
       let fDx = p.x - f.x;
@@ -285,16 +288,18 @@ setInterval(() => {
     }
   }
 
-  // БИТВА: Столкновения
+  // ОБСЛУЖИВАНИЕ СТОЛКНОВЕНИЙ (БИТВА)
   for (let id in players) {
     let p = players[id];
     if (p.spawnProtection > 0) continue;
 
     for (let otherId in players) {
-      let other = players[otherId];
-      let startIdx = (id === otherId) ? 4 : 0; 
+      // ФИКС: Если это один и тот же игрок — полностью игнорируем столкновение!
+      if (id === otherId) continue; 
 
-      for (let i = startIdx; i < other.snake.length; i++) {
+      let other = players[otherId];
+
+      for (let i = 0; i < other.snake.length; i++) {
         let seg = other.snake[i];
         let hitDx = p.x - seg.x;
         let hitDy = p.y - seg.y;
@@ -310,7 +315,7 @@ setInterval(() => {
     }
   }
 
-  // [ОБНОВЛЕНО] Обработка гибели ботов/игроков
+  // Обработка гибели
   deadPlayers.forEach(d => {
     if (players[d.id]) {
       const droppedFoods = dropFoodOnDeath(d.snake, d.skin);
@@ -323,7 +328,7 @@ setInterval(() => {
       delete players[d.id];
 
       if (wasBot) {
-          spawnServerBot(); // Если погиб бот, мгновенно спавним ему замену
+          spawnServerBot(); 
       }
     }
   });
@@ -331,31 +336,27 @@ setInterval(() => {
 
 
 // СЕТЕВЫЕ ПОТОКИ ВЕБ-СОКЕТОВ
-// 1. Поток позиций змеек (20 FPS / Каждые 50мс)
+// 1. Поток игровых позиций змеек (20 FPS / Каждые 50мс для плавной интерполяции)
 setInterval(() => {
   if (Object.keys(players).length > 0) {
     io.emit('heartbeat', players);
   }
 }, 50);
 
-// 2. Поток РАДАРА (Каждые 0.5 секунды)
+// 2. Поток ЛИДЕРБОРДА (Каждые 2 секунды / 2000мс)
 setInterval(() => {
   if (Object.keys(players).length === 0) return;
-  const radarData = Object.values(players).map(p => ({ id: p.id, x: p.x, y: p.y }));
-  io.emit('radar_update', radarData);
-}, 500);
 
-// 3. Поток ЛИДЕРБОРДА (Каждые 2 секунды)
-setInterval(() => {
-  if (Object.keys(players).length === 0) return;
   const leaderboardData = Object.values(players)
     .map(p => ({ id: p.id, name: p.name, score: p.score }))
     .sort((a, b) => b.score - a.score)
-    .slice(0, 10);
+    .slice(0, 10); 
+
   io.emit('leaderboard_update', leaderboardData);
 }, 2000);
 
+
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
-  console.log(`Сервер обновлен. Боты распределены и замаскированы.`);
+  console.log(`Сервер запущен. Порт: ${PORT}. Оптимальная конфигурация сети и безопасности хвоста включена.`);
 });
